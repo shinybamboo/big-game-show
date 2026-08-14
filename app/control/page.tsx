@@ -1,47 +1,41 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 
-// TEMPORARY — hard-coded for this realtime proof-of-concept only.
-const SHOW_ID = "a6df39a6-6552-4288-85e6-0406e85aff18";
-
-export default function ControlPage() {
-  const [currentMessage, setCurrentMessage] = useState<string | null>(null);
-  const [input, setInput] = useState("");
-  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+export default function CreateShowPage() {
+  const router = useRouter();
+  const [name, setName] = useState("");
+  const [tableCount, setTableCount] = useState("4");
+  const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
+  function validate(): string | null {
+    if (name.trim().length === 0) return "Show name is required.";
 
-    async function loadCurrentMessage() {
-      const { data, error } = await supabase
-        .from("live_show_state")
-        .select("live_state")
-        .eq("show_id", SHOW_ID)
-        .single();
-
-      if (cancelled || error || !data) return;
-
-      const liveState = data.live_state as Record<string, unknown> | null;
-      setCurrentMessage(typeof liveState?.test_message === "string" ? liveState.test_message : null);
+    const count = Number(tableCount);
+    if (!Number.isInteger(count) || count <= 0) {
+      return "Number of tables must be a positive whole number.";
     }
 
-    loadCurrentMessage();
+    return null;
+  }
 
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  async function handleCreate() {
+    const validationError = validate();
+    if (validationError) {
+      setStatus("error");
+      setErrorMessage(validationError);
+      return;
+    }
 
-  async function handleSetMessage() {
     setStatus("loading");
     setErrorMessage(null);
 
-    const { error } = await supabase.rpc("poc_set_live_state_test_message", {
-      p_show_id: SHOW_ID,
-      p_message: input,
+    const { data, error } = await supabase.rpc("create_show", {
+      p_name: name.trim(),
+      p_table_count: Number(tableCount),
     });
 
     if (error) {
@@ -50,27 +44,45 @@ export default function ControlPage() {
       return;
     }
 
-    setStatus("success");
-    setCurrentMessage(input);
+    const row = Array.isArray(data) ? data[0] : data;
+
+    if (!row?.id) {
+      setStatus("error");
+      setErrorMessage("Show was created but no ID was returned.");
+      return;
+    }
+
+    router.push(`/control/${row.id}`);
   }
 
   return (
     <main style={{ padding: 24, fontFamily: "monospace" }}>
-      <h1>/control (realtime POC)</h1>
-      <p>show_id: {SHOW_ID}</p>
-      <p>Current test_message: {currentMessage ?? "(none)"}</p>
+      <h1>/control — Create Show</h1>
 
-      <input
-        value={input}
-        onChange={(event) => setInput(event.target.value)}
-        placeholder="Enter test message"
-        style={{ marginRight: 8 }}
-      />
-      <button onClick={handleSetMessage} disabled={status === "loading"}>
-        SET MESSAGE
+      <div style={{ marginBottom: 8 }}>
+        <label>
+          Show Name{" "}
+          <input value={name} onChange={(event) => setName(event.target.value)} />
+        </label>
+      </div>
+
+      <div style={{ marginBottom: 8 }}>
+        <label>
+          Number of Tables{" "}
+          <input
+            type="number"
+            min={1}
+            value={tableCount}
+            onChange={(event) => setTableCount(event.target.value)}
+          />
+        </label>
+      </div>
+
+      <button onClick={handleCreate} disabled={status === "loading"}>
+        CREATE SHOW
       </button>
 
-      {status === "success" && <p>Success.</p>}
+      {status === "loading" && <p>Creating show...</p>}
       {status === "error" && <p>Error: {errorMessage}</p>}
     </main>
   );
